@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.graphics.Bitmap.Config;
 import android.graphics.drawable.Drawable;
@@ -49,6 +50,7 @@ import com.slicejobs.panacamera.cameralibrary.helper.ToastUtil;
 import com.slicejobs.panacamera.cameralibrary.model.bean.IntentKey;
 import com.slicejobs.panacamera.cameralibrary.model.event.TakePictureResult;
 import com.slicejobs.panacamera.cameralibrary.utils.ImageUtil;
+import com.slicejobs.panacamera.cameralibrary.widget.BalanceView;
 import com.slicejobs.panacamera.cameralibrary.widget.RectImageView;
 import com.socks.library.KLog;
 import com.tbruyelle.rxpermissions2.RxPermissions;
@@ -59,8 +61,15 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.List;
 import me.drakeet.materialdialog.MaterialDialog;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.view.SurfaceHolder;
+import android.widget.RelativeLayout;
 
-public class CameraActivity extends Activity implements Callback, SensorControler.CameraFocusListener, OnClickListener {
+
+public class CameraActivity extends Activity implements Callback, SensorControler.CameraFocusListener, OnClickListener, SensorEventListener{
     private static final String TAG = "CameraActivity";
     private SurfaceView mSurfaceView;
     private ImageView btnClose;
@@ -73,6 +82,7 @@ public class CameraActivity extends Activity implements Callback, SensorControle
     private SimpleDraweeView imgThumbnail;
     private LinearLayout llThumbnail;
     private RelativeLayout guideLayout;
+    RelativeLayout rlHBubble;
     private MaterialDialog mVagueDialog;
     private MaterialDialog mDeleteLastImageDialog;
     private int cameraPosition = 0;
@@ -103,6 +113,11 @@ public class CameraActivity extends Activity implements Callback, SensorControle
     private int mValidHint = 0;
     private int mValidOverlap = 0;
     private String panoImagPath = null;
+
+    private BalanceView hBalanceView;
+    private SurfaceHolder surfaceHolder;
+    private SensorManager sensorManager;
+
     public Handler mHanlder = new Handler() {
         public void handleMessage(Message msg) {
             super.handleMessage(msg);
@@ -294,6 +309,8 @@ public class CameraActivity extends Activity implements Callback, SensorControle
         this.imgThumbnail = (SimpleDraweeView)this.findViewById(R.id.imgThumbnail);
         this.llThumbnail = (LinearLayout)this.findViewById(R.id.llThumbnail);
         this.imgDelete = (ImageView)this.findViewById(R.id.imgDelete);
+        rlHBubble = (RelativeLayout) findViewById(R.id.rl_h_bubble);
+
         guideLayout = findViewById(R.id.rlMask);
         this.btnClose.setOnClickListener(this);
         this.btnTakePhoto.setOnClickListener(this);
@@ -301,6 +318,49 @@ public class CameraActivity extends Activity implements Callback, SensorControle
         this.imgSureCamera.setOnClickListener(this);
         this.llThumbnail.setOnClickListener(this);
         this.imgDelete.setOnClickListener(this);
+
+        initSpiri();
+        initSensor();
+
+    }
+
+    private void initSpiri() {
+        hBalanceView = new BalanceView(this, DensityUtil.dip2px(this, 300), DensityUtil.dip2px(this, 300));
+        surfaceHolder = hBalanceView.getHolder();
+        hBalanceView.setZOrderOnTop(true);
+        surfaceHolder.setFormat(PixelFormat.TRANSPARENT);//设置背景透明
+        surfaceHolder.addCallback(new SurfaceHolder.Callback() {
+
+            @Override
+            public void surfaceChanged(SurfaceHolder holder, int format, int width,
+                                       int height) {
+
+            }
+
+            //一切都准备好
+            @Override
+            public void surfaceCreated(SurfaceHolder holder) {
+                hBalanceView.setSurfaceHolder(surfaceHolder);
+                Thread thread = new Thread(hBalanceView);
+                thread.start();
+            }
+
+            @Override
+            public void surfaceDestroyed(SurfaceHolder holder) {
+            }
+        });
+
+        rlHBubble.addView(hBalanceView);
+    }
+
+    private void initSensor() {
+        sensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);//初始化传感器
+        Sensor sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);//获得加速度传感器
+//        Sensor sensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);//陀螺仪
+        if (null != sensor && sensorManager != null) {
+            //根据不同应用，需要的反应速率不同，具体根据实际情况设定
+            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL);
+        }
     }
 
     protected void initEventAndData() {
@@ -646,6 +706,12 @@ public class CameraActivity extends Activity implements Callback, SensorControle
             this.mPreViewFrameThread.setProcessState(false);
             this.mPreViewFrameThread.notifyThread();
         }
+        if(sensorManager != null){
+            sensorManager.unregisterListener(this);
+        }
+        if (hBalanceView != null) {
+            hBalanceView.colseThread();//停止线程
+        }
 
         super.onDestroy();
     }
@@ -911,5 +977,34 @@ public class CameraActivity extends Activity implements Callback, SensorControle
             }
 
         }
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        final float x = event.values[0];
+        final float y = event.values[1];
+        final float z = event.values[2];
+
+        if (y > 5) {//才是侧面, 10正侧面
+            hBalanceView.updateBubble(z, x);
+            if (hBalanceView.isHorizontal()) {
+                if (hBalanceView.isVertical()) {
+
+                } else {
+                    ToastUtil.show("设备请不要前后倾斜");
+                }
+            } else {
+                ToastUtil.show("设备请不要前后倾斜");
+            }
+
+        } else {
+            ToastUtil.show("请将设备拿正！");
+        }
+
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+
     }
 }
